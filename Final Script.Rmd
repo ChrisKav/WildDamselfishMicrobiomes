@@ -1,7 +1,7 @@
 ---
 title: "Wild Damsel Fish Analysis"
 author: "Christopher Kavazos"
-date: "27 February 2019"
+date: "15 June 2020"
 output: pdf_document
 ---
 
@@ -34,7 +34,6 @@ library(grid)
 library(gridExtra)
 library(cowplot)
 library(ape)
-library(microbiome)
 library(phangorn)
 
 source("source_functions.R")
@@ -47,20 +46,8 @@ set.seed(100)
 This section imports the data as .biom and .fasta files in the workspace as phyloseq objects.
 
 ```{r echo=TRUE, include=TRUE, tidy=TRUE, warning=FALSE}
-biom_path <- "/home/barefootbushman/Documents/070615JC27F/Export/table-metadata-taxonomy.biom"
-tree_path <- "/home/barefootbushman/Documents/070615JC27F/Export/tree.nwk"
-seq_path <- "/home/barefootbushman/Documents/070615JC27F/Export/dna-sequences.fasta"
-
-data <- import_biom(BIOMfilename = biom_path, treefilename = tree_path, refseqfilename = seq_path, 
-                    parseFunction = parse_taxonomy_greengenes)
-
-tax_table(data) <- tax_table(data)[,1:7]
-#colnames(tax_table(data)) <- c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")
-df <- as.data.frame(lapply(sample_data(data),
-                           function (y) if(class(y)!="chr" ) as.factor(y) else y),stringsAsFactors=T)
-row.names(df) <- sample_names(data)
-sample_data(data) <- sample_data(df)
-seqs <- readDNAStringSet(seq_path)
+load("raw_data.RData")
+seqs <- refseq(data)
 ```
 
 # Pre-processing of data
@@ -161,14 +148,14 @@ obs <- ggplot(alphI, aes(Species,Observed)) +
   geom_boxplot(aes(fill = Species)) +
   ylab("Observed OTUs") +
   theme_classic() +
-  stat_summary(fun.y=mean, geom="point", shape=5, size=4) +
+  stat_summary(fun=mean, geom="point", shape=5, size=4) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) + theme(legend.position="none")
 
 shan <- ggplot(alphI, aes(Species,Shannon)) +
   geom_boxplot(aes(fill=Species)) +
   ylab("Shannon Index") +
   xlab(" ") + theme_classic() +
-  stat_summary(fun.y=mean, geom="point", shape=5, size=4) +
+  stat_summary(fun=mean, geom="point", shape=5, size=4) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) + theme(legend.position="none")
 
 Pielou = (alphI$Shannon/log(alphI$Observed))
@@ -177,7 +164,7 @@ piel <- ggplot(alphI, aes(Species,Pielou)) +
   geom_boxplot(aes(fill=Species)) +
   ylab("Pielou Evenness") +
   xlab(" ") + theme_classic() +
-  stat_summary(fun.y=mean, geom="point", shape=5, size=4) +
+  stat_summary(fun=mean, geom="point", shape=5, size=4) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) + theme(legend.position="none")
 
 multiplot(obs,shan,piel, cols = 3)
@@ -354,7 +341,7 @@ ps.otu2 <- data.frame(t(otu_table(psI2rar)))
 core <- core.fit(ps.otu2)
 
 # Conventional figure
-dev.off()
+#dev.off()
 plot.new()
 plot(freq~log(p),pch=18,col=ifelse(freq>=0.8,"blue",
                                    ifelse(freq>=0.7,"blue",
@@ -812,9 +799,291 @@ diet.box
 ggsave("diet_boxplots.pdf", diet.box, width=210, height=297, units="mm")
 ```
 
+# Boral - ordination plots
+
+This analysis produces the ordinations plots for each phyla.
+
+```{r echo=TRUE, include=TRUE, tidy=TRUE}
+library(mvabund)
+library(boral)
+library(RColorBrewer)
+
+psIF.rar <- rarefy_even_depth(psIF, sample.size = min(sample_sums(psIF)), rngseed = 1)
+
+Proteo = subset_taxa(psIF.rar, Phylum=="Proteobacteria")
+Bacter = subset_taxa(psIF.rar, Phylum=="Bacteroidetes")
+Firmi = subset_taxa(psIF.rar, Phylum=="Firmicutes")
+Planc = subset_taxa(psIF.rar, Phylum=="Planctomycetes")
+Tener <- subset_taxa(psIF.rar, Phylum=="Tenericutes")
+Spiro <-subset_taxa(psIF.rar, Phylum=="Spirochaetes")
+Verru <- subset_taxa(psIF.rar, Phylum=="Verrucomicrobia")
+
+Proteo = subset_taxa(psI, Phylum=="Proteobacteria")
+y <- data.frame(t(otu_table(Proteo)))
+fit.lvmnb1<-boral(y=y, family="negative.binomial", lv.control =list(num.lv=2), row.eff="fixed")
+
+Bacter = subset_taxa(psI, Phylum=="Bacteroidetes")
+x <- data.frame(t(otu_table(Bacter)))
+fit.lvmnb2 <- boral(y=x, family="negative.binomial", lv.control =list(num.lv=2), row.eff="fixed")
+
+Firmi = subset_taxa(psI, Phylum=="Firmicutes")
+z <- data.frame(t(otu_table(Firmi)))
+fit.lvmnb3 <- boral(y=z, family="negative.binomial", lv.control =list(num.lv=2), row.eff="fixed")
+
+Planc = subset_taxa(psI, Phylum=="Planctomycetes")
+w <- data.frame(t(otu_table(Planc)))
+fit.lvmnb4 <- boral(y=w, family="negative.binomial", lv.control =list(num.lv=2), row.eff="fixed")
+
+#alpha is an arguement in lvsplot(); relates to scaling
+alpha <- 0.5 
+
+testcov.1 <- fit.lvmnb1$lv.median %*% t(fit.lvmnb1$lv.coefs.median[, 2:3])
+testcov.2 <- fit.lvmnb2$lv.median %*% t(fit.lvmnb2$lv.coefs.median[, 2:3])
+testcov.3 <- fit.lvmnb3$lv.median %*% t(fit.lvmnb3$lv.coefs.median[, 2:3])
+testcov.4 <- fit.lvmnb4$lv.median %*% t(fit.lvmnb4$lv.coefs.median[, 2:3])
+
+#singular value decom
+do.svd1 <- svd(testcov.1, fit.lvmnb1$num.lv, fit.lvmnb1$num.lv)
+do.svd2 <- svd(testcov.2, fit.lvmnb2$num.lv, fit.lvmnb2$num.lv)
+do.svd3 <- svd(testcov.3, fit.lvmnb3$num.lv, fit.lvmnb3$num.lv)
+do.svd4 <- svd(testcov.4, fit.lvmnb4$num.lv, fit.lvmnb4$num.lv)
+
+#svd has components d, u and v
+
+#some math related to rescaling
+choose.lvs1 <- scale(do.svd1$u * matrix(do.svd1$d[1:fit.lvmnb1$num.lv]^alpha, 
+                                        nrow = fit.lvmnb1$n, ncol = 2, byrow = T), center = T, scale = F)
+choose.lvs2 <- scale(do.svd2$u * matrix(do.svd2$d[1:fit.lvmnb2$num.lv]^alpha, 
+                                        nrow = fit.lvmnb2$n, ncol = 2, byrow = T), center = T, scale = F)
+choose.lvs3 <- scale(do.svd3$u * matrix(do.svd3$d[1:fit.lvmnb3$num.lv]^alpha, 
+                                        nrow = fit.lvmnb3$n, ncol = 2, byrow = T), center = T, scale = F)
+choose.lvs4 <- scale(do.svd4$u * matrix(do.svd4$d[1:fit.lvmnb4$num.lv]^alpha, 
+                                        nrow = fit.lvmnb4$n, ncol = 2, byrow = T), center = T, scale = F)
+
+treat <- sample_data(psIF.rar)$Treatment
+speci <- sample_data(psIF.rar)$FishSpecies
+speci <- as.factor(speci)
+
+### Proteobacteria
+
+choose.lvs1 <- as.data.frame(cbind(choose.lvs1, treat, speci))
+choose.lvs1$treat <- as.factor(choose.lvs1$treat)
+choose.lvs1$speci <- as.factor(choose.lvs1$speci)
+colnames(choose.lvs1)[1:2] <- c("LV1", "LV2")
+
+speci.hull.proteo <- NULL
+for(i in levels(choose.lvs1$speci)){
+  tmp <- choose.lvs1[choose.lvs1$speci == i, ][chull(choose.lvs1[choose.lvs1$speci == i ,
+                                                                 c("LV1", "LV2")]), ]
+  if(is.null(speci.hull.proteo)){speci.hull.proteo <- tmp} else 
+    speci.hull.proteo <- rbind(speci.hull.proteo, tmp)
+}
+
+treat.hull.proteo <- NULL
+for(i in levels(choose.lvs1$treat)){
+  tmp <- choose.lvs1[choose.lvs1$treat == i, ][chull(choose.lvs1[choose.lvs1$treat == i ,
+                                                                 c("LV1", "LV2")]), ]
+  if(is.null(treat.hull.proteo)){treat.hull.proteo <- tmp} else 
+    treat.hull.proteo <- rbind(treat.hull.proteo, tmp)
+}
+
+pa1 <- ggplot() +
+  geom_polygon(data=speci.hull.proteo, aes(x=LV1, y=LV2, fill=speci, group=speci), alpha=0.3) +
+  geom_point(data=choose.lvs1, aes(x=LV1, y=LV2, colour=speci), size=4) +
+  coord_equal() +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_text(size=18),
+        axis.title.y = element_text(size=18),
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.background = element_blank(),
+        panel.border = element_rect(colour="black", fill=NA))
+
+pa2 <- ggplot() +
+  geom_polygon(data=treat.hull.proteo, aes(x=LV1, y=LV2, fill=treat, group=treat), alpha=0.3) +
+  geom_point(data=choose.lvs1, aes(x=LV1, y=LV2, colour=treat)) +
+  coord_equal() +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_text(size=18),
+        axis.title.y = element_text(size=18),
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.background = element_blank(),
+        panel.background = element_rect(colour="black", fill=NA, size=2))
+
+### Bacteroidetes
+
+choose.lvs2 <- as.data.frame(cbind(choose.lvs2, treat, speci))
+choose.lvs2$treat <- as.factor(choose.lvs2$treat)
+choose.lvs2$speci <- as.factor(choose.lvs2$speci)
+colnames(choose.lvs2)[1:2] <- c("LV1", "LV2")
+
+speci.hull.bacter <- NULL
+for(i in levels(choose.lvs2$speci)){
+  tmp <- choose.lvs2[choose.lvs2$speci == i, ][chull(choose.lvs2[choose.lvs2$speci == i ,
+                                                                 c("LV1", "LV2")]), ]
+  if(is.null(speci.hull.bacter)){speci.hull.bacter <- tmp} else 
+    speci.hull.bacter <- rbind(speci.hull.bacter, tmp)
+}
+
+treat.hull.bacter <- NULL
+for(i in levels(choose.lvs2$treat)){
+  tmp <- choose.lvs2[choose.lvs2$treat == i, ][chull(choose.lvs2[choose.lvs2$treat == i ,
+                                                                 c("LV1", "LV2")]), ]
+  if(is.null(treat.hull.bacter)){treat.hull.bacter <- tmp} else 
+    treat.hull.bacter <- rbind(treat.hull.bacter, tmp)
+}
+
+pb1 <- ggplot() +
+  geom_polygon(data=speci.hull.bacter, aes(x=LV1, y=LV2, fill=speci, group=speci), alpha=0.3) +
+  geom_point(data=choose.lvs2, aes(x=LV1, y=LV2, colour=speci), size=4) +
+  coord_equal() +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_text(size=18),
+        axis.title.y = element_text(size=18),
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.background = element_blank(),
+        panel.border = element_rect(colour="black", fill=NA))
+
+pb2 <- ggplot() +
+  geom_polygon(data=treat.hull.bacter, aes(x=LV1, y=LV2, fill=treat, group=treat), alpha=0.3) +
+  geom_point(data=choose.lvs2, aes(x=LV1, y=LV2, colour=treat)) +
+  coord_equal() +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_text(size=18),
+        axis.title.y = element_text(size=18),
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.background = element_blank(),
+        panel.border = element_rect(colour="black", fill=NA))
+
+### Firmicutes
+
+choose.lvs3 <- as.data.frame(cbind(choose.lvs3, treat, speci))
+choose.lvs3$treat <- as.factor(choose.lvs3$treat)
+choose.lvs3$speci <- as.factor(choose.lvs3$speci)
+colnames(choose.lvs3)[1:2] <- c("LV1", "LV2")
+
+speci.hull.firmi <- NULL
+for(i in levels(choose.lvs3$speci)){
+  tmp <- choose.lvs3[choose.lvs3$speci == i, ][chull(choose.lvs3[choose.lvs3$speci == i ,
+                                                                 c("LV1", "LV2")]), ]
+  if(is.null(speci.hull.firmi)){speci.hull.firmi <- tmp} else 
+    speci.hull.firmi <- rbind(speci.hull.firmi, tmp)
+}
+
+treat.hull.firmi <- NULL
+for(i in levels(choose.lvs3$treat)){
+  tmp <- choose.lvs3[choose.lvs3$treat == i, ][chull(choose.lvs3[choose.lvs3$treat == i ,
+                                                                 c("LV1", "LV2")]), ]
+  if(is.null(treat.hull.firmi)){treat.hull.firmi <- tmp} else 
+    treat.hull.firmi <- rbind(treat.hull.firmi, tmp)
+}
+
+pc1 <- ggplot() +
+  geom_polygon(data=speci.hull.firmi, aes(x=LV1, y=LV2, fill=speci, group=speci), alpha=0.3) +
+  geom_point(data=choose.lvs3, aes(x=LV1, y=LV2, colour=speci), size=4) +
+  coord_equal() +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_text(size=18),
+        axis.title.y = element_text(size=18),
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.background = element_blank(),
+        panel.border = element_rect(colour="black", fill=NA))
+
+pc2 <- ggplot() +
+  geom_polygon(data=treat.hull.firmi, aes(x=LV1, y=LV2, fill=treat, group=treat), alpha=0.3) +
+  geom_point(data=choose.lvs3, aes(x=LV1, y=LV2, colour=treat)) +
+  coord_equal() +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_text(size=18),
+        axis.title.y = element_text(size=18),
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.background = element_blank(),
+        panel.border = element_rect(colour="black", fill=NA))
+
+### Planctomycetes
+
+choose.lvs4 <- as.data.frame(cbind(choose.lvs4, treat, speci))
+choose.lvs4$treat <- as.factor(choose.lvs4$treat)
+choose.lvs4$speci <- as.factor(choose.lvs4$speci)
+colnames(choose.lvs4)[1:2] <- c("LV1", "LV2")
+
+speci.hull.planc <- NULL
+for(i in levels(choose.lvs4$speci)){
+  tmp <- choose.lvs4[choose.lvs4$speci == i, ][chull(choose.lvs4[choose.lvs4$speci == i ,
+                                                                 c("LV1", "LV2")]), ]
+  if(is.null(speci.hull.planc)){speci.hull.planc <- tmp} else 
+    speci.hull.planc <- rbind(speci.hull.planc, tmp)
+}
+
+treat.hull.planc <- NULL
+for(i in levels(choose.lvs4$treat)){
+  tmp <- choose.lvs4[choose.lvs4$treat == i, ][chull(choose.lvs4[choose.lvs4$treat == i ,
+                                                                 c("LV1", "LV2")]), ]
+  if(is.null(treat.hull.planc)){treat.hull.planc <- tmp} else 
+    treat.hull.planc <- rbind(treat.hull.planc, tmp)
+}
+
+pd1 <- ggplot() +
+  geom_polygon(data=speci.hull.planc, aes(x=LV1, y=LV2, fill=speci, group=speci), alpha=0.3) +
+  geom_point(data=choose.lvs4, aes(x=LV1, y=LV2, colour=speci), size=4) +
+  coord_equal() +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_text(size=18),
+        axis.title.y = element_text(size=18),
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.background = element_blank(),
+        panel.border = element_rect(colour="black", fill=NA))
+
+pd2 <- ggplot() +
+  geom_polygon(data=treat.hull.planc, aes(x=LV1, y=LV2, fill=treat, group=treat), alpha=0.3) +
+  geom_point(data=choose.lvs4, aes(x=LV1, y=LV2, colour=treat)) +
+  coord_equal() +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_text(size=18),
+        axis.title.y = element_text(size=18),
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.background = element_blank(),
+        panel.border = element_rect(colour="black", fill=NA))
+
+
+ggsave("ordinations.pdf", 
+       ggarrange(pa1, pa2, pb1, pb2, pc1, pc2, pd1, pd2, ncol=2), dpi=600, width=210, height=297, units="mm")
+```
+       
 # Analysis of Chlorphyll
 
-First we extract all Chlosoplast and Cyanobacterial sequences and store as a phyloseq object 'Chloro'
+First we extract all Chloroplast and Cyanobacterial sequences and store as a phyloseq object 'Chloro'
 
 ```{r echo=TRUE, include=TRUE, tidy=TRUE}
 Chloro = subset_taxa(data, Class=="Chloroplast" | Phylum=="Cyanobacteria")
