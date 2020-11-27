@@ -144,19 +144,55 @@ alpha.sp
 ## Construct plots
 
 ```{r echo=TRUE, include=TRUE, tidy=TRUE}
+alphI$Species <- factor(alphI$Species,
+                        levels = c("polyacanthus", "sexfasciatus",  "whitleyi", "atripectoralis",
+                                   "moluccensis", "perspicillatus", "pseudochrysopoecilus", "wardi", 
+                                   "apicalis", "nigricans"))
+
+levels(alphI$Species)[levels(alphI$Species)=="polyacanthus"] <- "A. polyacanthus"
+levels(alphI$Species)[levels(alphI$Species)=="sexfasciatus"] <- "A. sexfasciatus"
+levels(alphI$Species)[levels(alphI$Species)=="whitleyi"] <- "A. whitleyi"
+levels(alphI$Species)[levels(alphI$Species)=="atripectoralis"] <- "C. atripectoralis"
+levels(alphI$Species)[levels(alphI$Species)=="moluccensis"] <- "P. moluccensis"
+levels(alphI$Species)[levels(alphI$Species)=="perspicillatus"] <- "D. perspicillatus"
+levels(alphI$Species)[levels(alphI$Species)=="pseudochrysopoecilus"] <- "D. pseudochrysopoecilus"
+levels(alphI$Species)[levels(alphI$Species)=="wardi"] <- "P. wardi"
+levels(alphI$Species)[levels(alphI$Species)=="apicalis"] <- "S. apicalis"
+levels(alphI$Species)[levels(alphI$Species)=="nigricans"] <- "S. nigricans"
+                       
 obs <- ggplot(alphI, aes(Species,Observed)) +
   geom_boxplot(aes(fill = Species)) +
-  ylab("Observed OTUs") +
+  ylab("Observed ASVs") +
   theme_classic() +
   stat_summary(fun=mean, geom="point", shape=5, size=4) +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + theme(legend.position="none")
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + theme(legend.position="none") +
+  scale_fill_manual(values = c("A. polyacanthus" = "red",
+                               "A. sexfasciatus" = "red",
+                               "A. whitleyi" = "red",
+                               "C. atripectoralis" = "red",
+                               "P. moluccensis" = "red",
+                               "D. perspicillatus" = "green",
+                               "D. pseudochrysopoecilus" = "green",
+                               "P. wardi" = "green",
+                               "S. apicalis" = "green",
+                               "S. nigricans" = "green"))
 
 shan <- ggplot(alphI, aes(Species,Shannon)) +
   geom_boxplot(aes(fill=Species)) +
   ylab("Shannon Index") +
   xlab(" ") + theme_classic() +
   stat_summary(fun=mean, geom="point", shape=5, size=4) +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + theme(legend.position="none")
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + theme(legend.position="none") +
+  scale_fill_manual(values = c("A. polyacanthus" = "red",
+                               "A. sexfasciatus" = "red",
+                               "A. whitleyi" = "red",
+                               "C. atripectoralis" = "red",
+                               "P. moluccensis" = "red",
+                               "D. perspicillatus" = "green",
+                               "D. pseudochrysopoecilus" = "green",
+                               "P. wardi" = "green",
+                               "S. apicalis" = "green",
+                               "S. nigricans" = "green"))
 
 Pielou = (alphI$Shannon/log(alphI$Observed))
 alphI["Pielou"] = Pielou
@@ -165,7 +201,17 @@ piel <- ggplot(alphI, aes(Species,Pielou)) +
   ylab("Pielou Evenness") +
   xlab(" ") + theme_classic() +
   stat_summary(fun=mean, geom="point", shape=5, size=4) +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + theme(legend.position="none")
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + theme(legend.position="none")+
+  scale_fill_manual(values = c("A. polyacanthus" = "red",
+                               "A. sexfasciatus" = "red",
+                               "A. whitleyi" = "red",
+                               "C. atripectoralis" = "red",
+                               "P. moluccensis" = "red",
+                               "D. perspicillatus" = "green",
+                               "D. pseudochrysopoecilus" = "green",
+                               "P. wardi" = "green",
+                               "S. apicalis" = "green",
+                               "S. nigricans" = "green"))
 
 multiplot(obs,shan,piel, cols = 3)
 
