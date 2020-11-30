@@ -677,7 +677,26 @@ sig.location.class <- subset(class_location.summary.stats, p_val <= 0.05)[,c(1,2
 ## Classes that significantly change with location along the gut
 
 ```{r echo=TRUE, include=TRUE, tidy=TRUE}
-sig.loc.class <- subset(otu_table(ps.class), rownames(otu_table(ps.class)) %in% row.names(sig.location.class))
+
+ps.ra <- transform_sample_counts(ps, function (x) x / sum(x))
+ps.class <- tax_glom(ps.ra, taxrank="Class")
+ps.class <- transform_sample_counts(ps.class, function (x) sqrt(sqrt(sqrt(x))))
+
+selected.class <- subset_taxa(ps.class, Class=="Bacteroidia" | Class == "Planctomycetia" | Class == "Clostridia"
+                              | Class ==  "Deltaproteobacteria" | Class == "Mollicutes" | 
+                                Class == "Flavobacteriia" | Class == "Erysipelotrichi" | Class == "Cytophagia")
+
+| Class == "Gammaproteobacteria" 
+
+
+
+plot_bar(selected.class)
+plot_bar(selected.class, fill="Class")
+plot_bar(selected.class, x="FishSpecies", fill="Class")
+plot_bar(selected.class, "Class", fill="Phylum", facet_grid=Treatment~Location)
+plot_bar(selected.class, "Phylum", fill="Phylum", facet_grid=Treatment~Location)
+
+sig.loc.class <- subset(otu_table(ps.class), rownames(otu_table(ps.class)) %in% row.names(sig.loc.class))
 sig.loc.class <- merge_phyloseq(sig.loc.class, tax_table(ps.class), sample_data(ps.class), phy_tree(ps.class),
                                 refseq(ps.class))
 tax_table(sig.loc.class)
