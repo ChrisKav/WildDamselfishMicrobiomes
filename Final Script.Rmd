@@ -678,23 +678,52 @@ sig.location.class <- subset(class_location.summary.stats, p_val <= 0.05)[,c(1,2
 
 ```{r echo=TRUE, include=TRUE, tidy=TRUE}
 
-ps.ra <- transform_sample_counts(ps, function (x) x / sum(x))
-ps.class <- tax_glom(ps.ra, taxrank="Class")
+wh0 = genefilter_sample(ps, filterfun_sample(function(x) x > 3))
+GP1 = prune_taxa(wh0, ps)
+GP1 <- transform_sample_counts(GP1, function (x) 1E6 * x / sum(x))
+phylum.sum = tapply(taxa_sums(GP1), tax_table(GP1)[, "Phylum"], sum, na.rm=TRUE)
+top5phyla = names(sort(phylum.sum, TRUE))[1:5]
+GP1 = prune_taxa((tax_table(GP1)[, "Phylum"] %in% top5phyla), GP1)
+plot_bar(GP1, "FishSpecies", fill="Phylum") + facet_wrap(Treatment~Location, scales= "free_x", nrow=2)
+
+GP.class <- tax_glom(GP1, taxrank="Class", NArm=FALSE)
+
+selected.class <- subset_taxa(GP.class, Class=="Bacteroidia" | Class == "Planctomycetia" | Class == "Clostridia"
+                              | Class == "Gammaproteobacteria" | Class ==  "Deltaproteobacteria" | Class == "Mollicutes" | 
+                                Class == "Flavobacteriia" | Class == "Erysipelotrichi" | Class == "Cytophagia")
+class.barplot <- plot_bar(selected.class, "Location", fill="Phylum") + facet_wrap(Treatment~FishSpecies, scales= "free_x", nrow=2)
+
+```
+
+```{r echo=TRUE, include=TRUE, tidy=TRUE}
+ps.class <- tax_glom(ps.ra, taxrank="Class", NArm=FALSE)
 ps.class <- transform_sample_counts(ps.class, function (x) sqrt(sqrt(sqrt(x))))
 
 selected.class <- subset_taxa(ps.class, Class=="Bacteroidia" | Class == "Planctomycetia" | Class == "Clostridia"
-                              | Class ==  "Deltaproteobacteria" | Class == "Mollicutes" | 
+                              | Class == "Gammaproteobacteria" | Class ==  "Deltaproteobacteria" | Class == "Mollicutes" | 
                                 Class == "Flavobacteriia" | Class == "Erysipelotrichi" | Class == "Cytophagia")
 
-| Class == "Gammaproteobacteria" 
 
-
+plot_bar(ps.ra, "FishSpecies", fill="Phylum") + facet_wrap(Treatment~Location, scales= "free_x", nrow=2)
 
 plot_bar(selected.class)
 plot_bar(selected.class, fill="Class")
 plot_bar(selected.class, x="FishSpecies", fill="Class")
 plot_bar(selected.class, "Class", fill="Phylum", facet_grid=Treatment~Location)
 plot_bar(selected.class, "Phylum", fill="Phylum", facet_grid=Treatment~Location)
+plot_bar(ps.class, "Phylum", fill="Phylum", facet_grid=Treatment~Location)
+
+rarecurve(t(otu_table(ps)), step=50, cex=0.5)
+
+ps.rarefied = rarefy_even_depth(ps, rngseed=1, sample.size=0.9*min(sample_sums(ps)), replace=F)
+plot(sample_sums(ps))
+plot(sample_sums(ps.rarefied))
+plot_bar(ps.rarefied, fill="Class")
+plot_bar(ps.rarefied, fill="Phylum") + facet_wrap(~Location, scales="free_x", nrow=1)
+
+plot_richness(ps.rarefied, x="Location", measures=c("Observed", "Shannon")) + geom_boxplot()
+plot_richness(ps.rarefied, x="FishSpecies", measures=c("Observed", "Shannon")) + geom_boxplot()
+plot_richness(ps.rarefied, x="Treatment", measures=c("Observed", "Shannon")) + geom_boxplot()
 
 sig.loc.class <- subset(otu_table(ps.class), rownames(otu_table(ps.class)) %in% row.names(sig.loc.class))
 sig.loc.class <- merge_phyloseq(sig.loc.class, tax_table(ps.class), sample_data(ps.class), phy_tree(ps.class),
