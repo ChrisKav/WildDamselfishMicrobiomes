@@ -1,7 +1,7 @@
 ---
 title: "Wild Damsel Fish Analysis"
-author: "Christopher Kavazos"
-date: "15 June 2020"
+author: "Chris Kavazos & Francesco Ricci"
+date: "25 May 2022"
 output: pdf_document
 ---
 
@@ -35,6 +35,7 @@ library(gridExtra)
 library(cowplot)
 library(ape)
 library(phangorn)
+library(enpls)
 
 source("source_functions.R")
 
@@ -46,8 +47,22 @@ set.seed(100)
 This section imports the data as .biom and .fasta files in the workspace as phyloseq objects.
 
 ```{r echo=TRUE, include=TRUE, tidy=TRUE, warning=FALSE}
-load("raw_data.RData")
-seqs <- refseq(data)
+setwd('~/Dropbox/My_manuscripts/Fish_gut_microbiome/data_analysis(I_think)/Statistical Analysis/Data')
+biom_path <- "~/Dropbox/My_manuscripts/Fish_gut_microbiome/data_analysis(I_think)/Statistical Analysis/Data/table-metadata-taxonomy.biom"
+tree_path <- "~/Dropbox/My_manuscripts/Fish_gut_microbiome/data_analysis(I_think)/Statistical Analysis/Data/tree.nwk"
+seq_path <- "~/Dropbox/My_manuscripts/Fish_gut_microbiome/data_analysis(I_think)/Statistical Analysis/Data/dna-sequences.fasta"
+
+data <-import_biom(BIOMfilename = biom_path, treefilename = tree_path, refseqfilename = seq_path,parseFunction = parse_taxonomy_greengenes)
+
+tax_table(data) <-tax_table(data)[, 1:7]
+
+df <- as.data.frame(lapply(sample_data(data),function(y)if(class(y)!="chr")as.factor(y)else y),stringsAsFactors = T)
+
+row.names(df) <- sample_names(data)
+
+sample_data(data) <- sample_data(df)
+
+seqs <- readDNAStringSet(seq_path)
 ```
 
 # Pre-processing of data
@@ -126,10 +141,12 @@ sample_data(psI) <- metadt
 Before assessing alpha richness, we rarefy the data to a common sammple size - here the minimum sample size.
 
 ```{r echo=TRUE, include=TRUE, tidy=TRUE}
-psIrar <- rarefy_even_depth(psI, sample.size = min(sample_sums(psI)))
+psIrar <- rarefy_even_depth(psI, sample.size = min(sample_sums(psI))) 
 sample_sums(psIrar)
 alphI <- estimate_richness(psIrar)
 alphI["Species"] <- metadt[,"FishSpecies"]
+metadata <- data.frame(sample_data(ps))
+
 
 alpha.sp <- NULL
 for(i in levels(alphI$Species)){
@@ -144,6 +161,7 @@ alpha.sp
 ## Construct plots
 
 ```{r echo=TRUE, include=TRUE, tidy=TRUE}
+source("http://peterhaschke.com/Code/multiplot.R")
 alphI$Species <- factor(alphI$Species,
                         levels = c("polyacanthus", "sexfasciatus",  "whitleyi", "atripectoralis",
                                    "moluccensis", "perspicillatus", "pseudochrysopoecilus", "wardi", 
@@ -216,8 +234,40 @@ piel <- ggplot(alphI, aes(Species,Pielou)) +
 multiplot(obs,shan,piel, cols = 3)
 
 # Save plot as a .pdf
-ggsave("a_diveristy_plots.pdf", multiplot(obs,shan,piel, cols = 3), width=297, height=210, units="mm")
+#ggsave("a_diveristy_plots.pdf", multiplot(obs,shan,piel, cols = 3), width=297, height=210, units="mm")
 ```
+
+
+##Alpha diversity between throphic guilds
+```{r echo=TRUE, include=TRUE, tidy=TRUE}
+#write.csv(alphI, file = "~/Dropbox/My_manuscripts/Fish_gut_microbiome/data_analysis(I_think)/Statistical Analysis/Data/alphI.csv")
+
+alphI <- read.csv("alphI.csv", row.names = 1, header = TRUE)
+
+qqnorm(alphI$Observed)
+shapiro.test(alphI$Observed)
+t.test(Observed ~ Treatment, data = alphI, alternative="two.side")
+
+qqnorm(alphI$Shannon)
+shapiro.test(alphI$Shannon)
+t.test(Shannon ~ Treatment, data = alphI, alternative="two.side")
+```
+
+##Alpha diversity among fishspecies
+```{r echo=TRUE, include=TRUE, tidy=TRUE}
+#write.csv(alphI, file = "~/Dropbox/My_manuscripts/Fish_gut_microbiome/data_analysis(I_think)/Statistical Analysis/Data/alphI.csv")
+
+qqnorm(alphI$Observed)
+shapiro.test(alphI$Observed)
+obs <- aov(Observed ~ Species, data = alphI)
+
+summary(obs)
+
+shan <- aov(Shannon ~ Species, data = alphI)
+summary(shan)
+
+```
+
 
 ## Top 20 most abundant taxa
 
@@ -274,103 +324,54 @@ specieslabs <- c("A. sexfasciatus","A. polyacanthus","C. atripectoralis","P. mol
 barplot <- barplot + scale_x_discrete(labels=specieslabs) + 
   theme(axis.text.y = element_text(face="italic"))
 ```
-## Circular plot
 
-Build circular plot of total pooled samples to show the relative abundances of each of the 20 most abundant ASVs
+##PCA and PERMANOVA
 
-```{r, echo=TRUE, tidy=TRUE}
+```{r echo=TRUE, include=TRUE, tidy=TRUE}
+sample_variables(psI)
 
-cir.dat <- data.frame(cbind(row.names(data.frame(tax_table(ps20m20))), as.character(data.frame(tax_table(ps20m20))[,2]),
-                 as.character(data.frame(tax_table(ps20m20))[,5]), 
-                 as.numeric(colSums(data.frame(otu_table(ps20m20))))))
-colnames(cir.dat) <- c("ASV", "Phylum", "Family", "Abundance")
-cir.dat$ASV <- NULL
-cir.dat$Abundance <- as.integer(cir.dat$Abundance)
+psI_clr <- transform(psI, transform = "clr", target ="OTU")
 
-# Set a number of 'empty bar' to add at the end of each group
-empty_bar=3
-to_add = data.frame( matrix(NA, empty_bar*nlevels(cir.dat$Phylum), ncol(cir.dat)) )
-colnames(to_add) = colnames(cir.dat)
-to_add$Phylum=rep(levels(cir.dat$Phylum), each=empty_bar)
-cir.dat=rbind(cir.dat, to_add)
-cir.dat=cir.dat %>% arrange(Phylum)
-cir.dat$id=seq(1, nrow(cir.dat))
+##Proteobacteria
+psI_clr_proteo <- subset_taxa(psI_clr, Phylum =="Proteobacteria")
+psI_clr_proteo_ord <- ordinate(psI_clr_proteo, "RDA", "euclidean")
+plot_ordination(psI_clr_proteo, psI_clr_proteo_ord, type = "sites", color = "FishSpecies", title = "proteo species") + theme_classic() + geom_point(size = 3) #+ stat_ellipse(type = "norm", linetype = 1) 
 
-# Get the name and the y position of each label
-label_data=cir.dat
-number_of_bar=nrow(label_data)
-# I substract 0.5 because the letter must have the angle of the center of the bars. 
-# Not extreme right(1) or extreme left (0)
-angle= 90 - 360 * (label_data$id-0.5) /number_of_bar     
-label_data$hjust<-ifelse( angle < -90, 1, 0)
-label_data$angle<-ifelse(angle < -90, angle+180, angle)
+plot_ordination(psI_clr_proteo, psI_clr_proteo_ord, type = "sites", color = "Treatment", title = "proteo group") +  theme_classic() + geom_point(size = 3)#+ stat_ellipse(type = "norm", linetype = 1) 
 
-# prepare a data frame for base lines
-base_data=cir.dat %>% 
-  group_by(Phylum) %>% 
-  summarize(start=min(id), end=max(id) - empty_bar) %>% 
-  rowwise() %>% 
-  mutate(title=mean(c(start, end)))
 
-# prepare a data frame for grid (scales)
-grid_data = base_data
-grid_data$end = grid_data$end[ c( nrow(grid_data), 1:nrow(grid_data)-1)] + 1
-grid_data$start = grid_data$start - 1
-grid_data=grid_data[-1,]
+dist_psI_clr_proteo <- phyloseq::distance(psI_clr_proteo, method = "euclidean")
+permutest(betadisper(dist_psI_clr_proteo, sample_data(psI_clr_proteo)$FishSpecies))
+adonis(dist_psI_clr_proteo ~ sample_data(psI_clr_proteo)$FishSpecies, permutations = 999)
 
-# Make the plot
-cir.p = ggplot(cir.dat, aes(x=as.factor(id), y=Abundance, fill=Phylum)) +
-  # Note that id is a factor. If x is numeric, there is some space between the first bar
-    geom_bar(aes(x=as.factor(id), y=Abundance, fill=Phylum), stat="identity", alpha=0.5) +
-    # Add a val=100/75/50/25 lines. I do it at the beginning to make sur barplots are OVER it.
-  geom_segment(data=grid_data, aes(x = end, y = 20, xend = start, yend = 20), 
-               colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
-  geom_segment(data=grid_data, aes(x = end, y = 15, xend = start, yend = 15), 
-               colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
-  geom_segment(data=grid_data, aes(x = end, y = 10, xend = start, yend = 10), 
-               colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
-  geom_segment(data=grid_data, aes(x = end, y = 5, xend = start, yend = 5), 
-               colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
-  
-  # Add text showing the value of each 100/75/50/25 lines
-  annotate("text", x = rep(max(cir.dat$id),2), y = c(10, 20), 
-           label = c("10", "20") , color="grey", size=3 , 
-           angle=0, fontface="bold", hjust=1) +
-  
-  geom_bar(aes(x=as.factor(id), y=Abundance, fill=Phylum), stat="identity", alpha=0.5) +
-  ylim(-100,80) +
-  theme_minimal() +
-  theme(
-    legend.position = "none",
-    axis.text = element_blank(),
-    axis.title = element_blank(),
-    panel.grid = element_blank(),
-    plot.margin = unit(rep(-1,4), "cm") 
-  ) +
-  coord_polar() + 
-  geom_text(data=label_data, aes(x=id, y=Abundance+10, label=Family, 
-                                 hjust=hjust), color="black", fontface="bold",
-            alpha=0.6, size=3, angle= label_data$angle, inherit.aes = FALSE ) +
-  
-  # Add base line information. Note hjust must have same number of values as groups
-  geom_segment(data=base_data, aes(x = start, y = -5, xend = end, yend = -5), 
-               colour = "black", alpha=0.8, size=0.6 , inherit.aes = FALSE )  +
-  geom_text(data=base_data, aes(x = title, y = -18, label=Phylum), 
-            hjust=c(1,0,0), colour = "black", alpha=0.8, size=4, 
-            fontface="bold", inherit.aes = FALSE)
-```
+permutest(betadisper(dist_psI_clr_proteo, sample_data(psI_clr_proteo)$Treatment))
+adonis(dist_psI_clr_proteo ~ sample_data(psI_clr_proteo)$Treatment, permutations = 999)
 
-##  Build Figure 1
+##Bacteroidetes
+psI_clr_bacte <- subset_taxa(psI_clr, Phylum =="Bacteroidetes")
+psI_clr_bacte_ord <- ordinate(psI_clr_bacte, "RDA", "euclidean")
+plot_ordination(psI_clr_bacte, psI_clr_bacte_ord, type = "samples", color = "FishSpecies", title = "bacte species") +  theme_classic() + geom_point(size = 3)#+ stat_ellipse(type = "norm", linetype = 1) 
+plot_ordination(psI_clr_bacte, psI_clr_bacte_ord, type = "samples", color = "Treatment", title = "bacte group") +  theme_classic() + geom_point(size = 3)#+ stat_ellipse(type = "norm", linetype = 1) 
 
-Produce a figure with the circular bar plot and fish species breakdown together. Additional format required in an editing program
+dist_psI_clr_bacte <- phyloseq::distance(psI_clr_bacte, method = "euclidean")
+permutest(betadisper(dist_psI_clr_bacte, sample_data(psI_clr_bacte)$FishSpecies))
+adonis(dist_psI_clr_bacte ~ sample_data(psI_clr_bacte)$FishSpecies, permutations = 999)
 
-```{r, echo=TRUE, tidy=TRUE}
-ggarrange(cir.p,barplot, ncol=2, nrow=1)
+permutest(betadisper(dist_psI_clr_bacte, sample_data(psI_clr_bacte)$Treatment))
+adonis(dist_psI_clr_bacte ~ sample_data(psI_clr_bacte)$Treatment, permutations = 999)
 
-ggsave(plot=ggarrange(cir.p,barplot, ncol=2, nrow=1),
-       file = "Figure1.pdf", 
-      width=396, height=280, units="mm",
-       useDingbats=FALSE)
+##Firmicutes
+psI_clr_firmi <- subset_taxa(psI_clr, Phylum =="Firmicutes")
+psI_clr_firmi_ord <- ordinate(psI_clr_firmi, "RDA", "euclidean")
+plot_ordination(psI_clr_firmi, psI_clr_firmi_ord, type = "samples", color = "FishSpecies", title = "firmi species") +  theme_classic() + geom_point(size = 3)#+ stat_ellipse(type = "norm", linetype = 1) 
+plot_ordination(psI_clr_firmi, psI_clr_firmi_ord, type = "samples", color = "Treatment", title = "firmi group") +  theme_classic() + geom_point(size = 3)#+ stat_ellipse(type = "norm", linetype = 1) 
+
+dist_psI_clr_firmi <- phyloseq::distance(psI_clr_firmi, method = "euclidean")
+permutest(betadisper(dist_psI_clr_firmi, sample_data(psI_clr_firmi)$FishSpecies))
+adonis(dist_psI_clr_firmi ~ sample_data(psI_clr_firmi)$FishSpecies, permutations = 999)
+
+permutest(betadisper(dist_psI_clr_firmi, sample_data(psI_clr_firmi)$Treatment))
+adonis(dist_psI_clr_firmi ~ sample_data(psI_clr_firmi)$Treatment, permutations = 999)
 ```
 
 # CORE Microbiome
@@ -380,22 +381,18 @@ This analysis assess the different levels of core microbiomes follwoing the meth
 ```{r echo=TRUE, include=TRUE, tidy=TRUE}
 psI2 <- merge_samples(ps, "Individual")
 sample_data(psI2) <- metadt
-psI2rar <- rarefy_even_depth(psI2, sample.size = min(sample_sums(psI2)), rngseed =100)
 
-ps.otu2 <- data.frame(t(otu_table(psI2rar)))
+ps.otu2 <- data.frame(t(otu_table(psI2)))
 
 core <- core.fit(ps.otu2)
 
 # Conventional figure
-#dev.off()
-plot.new()
 plot(freq~log(p),pch=18,col=ifelse(freq>=0.8,"blue",
                                    ifelse(freq>=0.7,"blue",
                                           ifelse(freq>=0.6,"blue",
                                                  ifelse(freq>=0.5,"blue",
                                                         ifelse(freq>=0.4,"blue",
-                                                               ifelse(freq>=0.3,"blue",
-                                                                      ifelse(freq>=0.3,"blue","gray")))))))
+                                                               ifelse(freq>=0.3,"blue","gray"))))))
      ,ylab="Occurence frequency",las=1,xlab="log(Mean Relative Abundance)",core$otu_matrix,ylim=c(0,1))
 
 lines(y=c(1,1),x=c(-9,0),lty=2,col="gray")
@@ -417,15 +414,24 @@ text(-9,0.415,"40%",col="gray40",cex=0.8)
 text(-9,0.315,"30%",col="gray40",cex=0.8)
 
 text(-10.2,0.6,"core\ncommunity\n(thresholds)",col="blue")
-text(-10.2,0.2,"variable\ncommunity",col="gray40")
+text(-10.2,0.25,"variable\ncommunity",col="gray40")
 
 # Save Core80 dataset
-core.30 <- subset_taxa(psI2rar, rownames(tax_table(psI2rar)) %in% rownames(core$core_30))
+core.30 <- subset_taxa(psI2, rownames(tax_table(psI2)) %in% rownames(core$core_30))
 tax_table(core.30)
+
+core.50 <- subset_taxa(psI2, rownames(tax_table(psI2)) %in% rownames(core$core_50))
+tax_table(core.50)
+
+core.80 <- subset_taxa(psI2, rownames(tax_table(psI2)) %in% rownames(core$core_80))
+tax_table(core.80)
+
+core.90 <- subset_taxa(psI2, rownames(tax_table(psI2)) %in% rownames(core$core_90))
+tax_table(core.90)
 ```
 
 ## Prevalence
-Here we calculate how many samples the ASVs ovvured in and their relative mean abundance using the rarefied data
+Here we calculate how many samples the ASVs occured in and their relative mean abundance using the rarefied data
 
 ```{r echo=TRUE, include=TRUE, tidy=TRUE}
 prevelancedf = apply(X = otu_table(psI2rar),
@@ -649,7 +655,10 @@ class.int <- manyglm(class.mv ~ class.sample$FishSpecies*class.sample$Location,
 class.spe <- manyglm(class.mv ~ class.sample$FishSpecies,
                    family = "negative binomial")
 
-class.nested <- anova(class.spe, class.int, p.uni="adjusted", test="LR", nBoot=999, resamp="montecarlo")
+class.diet <- manyglm(class.mv ~ class.sample$Treatment,
+                   family = "negative binomial")
+
+class.nested <- anova(class.diet, class.spe, class.int, p.uni="adjusted", test="LR", nBoot=999, resamp="montecarlo")
 
 ```
 
@@ -691,490 +700,11 @@ GP.class <- tax_glom(GP1, taxrank="Class", NArm=FALSE)
 selected.class <- subset_taxa(GP.class, Class=="Bacteroidia" | Class == "Planctomycetia" | Class == "Clostridia"
                               | Class == "Gammaproteobacteria" | Class ==  "Deltaproteobacteria" | Class == "Mollicutes" | 
                                 Class == "Flavobacteriia" | Class == "Erysipelotrichi" | Class == "Cytophagia")
-class.barplot <- plot_bar(selected.class, "Location", fill="Phylum") + facet_wrap(Treatment~FishSpecies, scales= "free_x", nrow=2)
 
+class.barplot <- plot_bar(selected.class, "Location", fill="Class") + facet_wrap(Treatment~FishSpecies, scales= "free_x", nrow=2)
+class.barplot
 ```
 
-```{r echo=TRUE, include=TRUE, tidy=TRUE}
-ps.class <- tax_glom(ps.ra, taxrank="Class", NArm=FALSE)
-ps.class <- transform_sample_counts(ps.class, function (x) sqrt(sqrt(sqrt(x))))
-
-selected.class <- subset_taxa(ps.class, Class=="Bacteroidia" | Class == "Planctomycetia" | Class == "Clostridia"
-                              | Class == "Gammaproteobacteria" | Class ==  "Deltaproteobacteria" | Class == "Mollicutes" | 
-                                Class == "Flavobacteriia" | Class == "Erysipelotrichi" | Class == "Cytophagia")
-
-
-plot_bar(ps.ra, "FishSpecies", fill="Phylum") + facet_wrap(Treatment~Location, scales= "free_x", nrow=2)
-
-plot_bar(selected.class)
-plot_bar(selected.class, fill="Class")
-plot_bar(selected.class, x="FishSpecies", fill="Class")
-plot_bar(selected.class, "Class", fill="Phylum", facet_grid=Treatment~Location)
-plot_bar(selected.class, "Phylum", fill="Phylum", facet_grid=Treatment~Location)
-plot_bar(ps.class, "Phylum", fill="Phylum", facet_grid=Treatment~Location)
-
-rarecurve(t(otu_table(ps)), step=50, cex=0.5)
-
-ps.rarefied = rarefy_even_depth(ps, rngseed=1, sample.size=0.9*min(sample_sums(ps)), replace=F)
-plot(sample_sums(ps))
-plot(sample_sums(ps.rarefied))
-plot_bar(ps.rarefied, fill="Class")
-plot_bar(ps.rarefied, fill="Phylum") + facet_wrap(~Location, scales="free_x", nrow=1)
-
-plot_richness(ps.rarefied, x="Location", measures=c("Observed", "Shannon")) + geom_boxplot()
-plot_richness(ps.rarefied, x="FishSpecies", measures=c("Observed", "Shannon")) + geom_boxplot()
-plot_richness(ps.rarefied, x="Treatment", measures=c("Observed", "Shannon")) + geom_boxplot()
-
-sig.loc.class <- subset(otu_table(ps.class), rownames(otu_table(ps.class)) %in% row.names(sig.loc.class))
-sig.loc.class <- merge_phyloseq(sig.loc.class, tax_table(ps.class), sample_data(ps.class), phy_tree(ps.class),
-                                refseq(ps.class))
-tax_table(sig.loc.class)
-otu_table(sig.loc.class)
-
-class.loc.data <- psmelt(sig.loc.class)[,c(1,2,3,9,12,15:18)]
-
-ASV_names <- list(
-  "7a805ea2c6634094ebd78b4669369434"= "Saprospirae",
-  "fe534f1229bb1b7a8ae1d289dee54966"= "Cytophagia",
-  "133b140ce8485b3935ffc762e5007f90"= "Bacteroidia",
-  "d8379007acfc27d6ddd8c99c7a664184"= "Flavobacteriia",
-  "5647a07a4a526bb674a9792c65a7756c"= "Mollicutes",
-  "e28e7ba09e89cf23875a9b4607658e2e"= "Erysipelotrichi",
-  "3023adf7ffbf02e4ffac033d9f7381f3"= "Clostridia",
-  "1bc2f1ba8b5778b613831487f858a248"= "Planctomycetia",
-  "af806f6e83225057eb82f2bf35c6e77d"= "Verrucomicrobiae",
-  "9a7283f9c2590a28af554fd89b10dba9"= "Deltaproteobacteria",
-  "b727ff5efbd37a9e8b1675747fe4874e"= "Gammaproteobacteria"
-)
-
-ASV_labeller <- function(variable,value){
-  return(ASV_names[value])
-}
-
-
-class.loc.box <- ggplot(class.loc.data, aes(Location, log(Abundance+1), color=Location)) +
-  geom_boxplot() + theme_classic() +
-  facet_wrap( ~ OTU , scales="free", labeller=ASV_labeller)+ 
-  theme(axis.text.x = element_text(angle = 0, hjust = 1)) + theme(legend.position="none")
-
-class.loc.box
-ggsave("location_class.pdf", class.loc.box, width=297, height=210, units="mm")
-```
-
-# Beta diversit 2 - Feeding behaviour
-
-Here we merge all samples for each indivudal and asses for differences in bacterial communities for each species of fish.
-
-Firstly, ASVs with relative abundances <5% and not present in at least 3 samples are removed. The dataset eneds to be reduced to speed up computational time.
-
-```{r echo=TRUE, include=TRUE, tidy=TRUE}
-psIF = filter_taxa(psI, function(x) sum(x > 3) > (0.05*length(x)), TRUE)
-```
-
-## Nested design
-
-```{r echo=TRUE, include=TRUE, tidy=TRUE}
-
-#Run mvabund model
-abund.otu <- data.frame(t(otu_table(psIF)))
-ps.sample <- data.frame(sample_data(psIF))
-treatment <- as.character(data.frame(sample_data(psIF))[,12])
-
-ps.mv <- mvabund(abund.otu)
-
-
-mod.int <- manyglm(ps.mv ~ ps.sample$FishSpecies*ps.sample$Treatment,
-                   family = "negative binomial")
-
-diet.nested <- anova(mod.int, p.uni="adjusted", test="LR", nBoot=999, resamp="montecarlo")
-
-```
-
-ANOVA table sumamrising the results
-
-```{r echo=TRUE, include=TRUE, tidy=TRUE}
-diet.nested$table
-```
-
-Results are summarised. We use a P values of < 0.10 to asses significance here to ensure we capture as many ASVsas possible
-
-```{r echo=TRUE, include=TRUE, tidy=TRUE}
-p.values <- data.frame(diet.nested$uni.p)
-p.values <- data.frame(t(p.values[2,]))
-colnames(p.values)[1] <- c("p_val")
-test.stat <- data.frame(diet.nested$uni.test)
-test.stat <- data.frame(t(test.stat[2,]))
-colnames(test.stat)[1] <- c("t_stat")
-summary.stats <- cbind(test.stat, p.values)
-row.names(summary.stats) <- sub('X', '', row.names(summary.stats))# Remove 'X' from OTU Ids
-
-sig.diet.sp <- subset(summary.stats, p_val <= 0.05)
-
-```
-
-## Feeding behaviour
-
-ASVs that significantly change with the different feeding behaviour species
-
-```{r echo=TRUE, include=TRUE, tidy=TRUE}
-sig.diet.otus <- subset(otu_table(psIrar), rownames(otu_table(psIrar)) %in% row.names(sig.diet.sp))
-sig.diet.otus <- merge_phyloseq(sig.diet.otus, tax_table(psIrar), sample_data(psIrar), phy_tree(psIrar),
-                                refseq(psIrar))
-```
-
-Agglomerate to reduce the number of taxa
-
-```{r echo=TRUE, include=TRUE, tidy=TRUE}
-sig.diet.fam <- tax_glom(sig.diet.otus, taxrank="Family")
-tax_table(sig.diet.fam)
-otu_table(sig.diet.fam)
-diet.data <- psmelt(sig.diet.fam)[,c(1,2,3,7,8,11,13, 15:19)]
-```
-
-## Plot results
-
-This section produces two sets of boxplots representing significant ASV changes with host species and feeding behaviour
-
-```{r echo=TRUE, include=TRUE, tidy=TRUE}
-
-ASV_names <- list(
-  "bec208ce410eba9fc44d1ae918fb7118"= "Cyclobacteriaceae",
-  "bb4cd78ebed29bae22c4e0e6cb033123" = "Flammeovirgaceae",
-  "f25abbe627a1c366346daba01df0edf1" = "Rikenellaceae",
-  "0f8a32868d367f7f08d563a7e0b6a3b1" = "Cryomorphaceae",
-  "9d252771a8d848fb05e4646c98295819" = "Flavobacteriaceae",
-  "fdf0d4d0ff9c296a444eddf1f245393d" = "Erysipelotrichaceae",
-  "3023adf7ffbf02e4ffac033d9f7381f3" = "Ruminococcaceae",
-  "77cf7f7c86aba621c027e850038e2400" = "Lachnospiraceae",
-  "1bc2f1ba8b5778b613831487f858a248" = "Pirellulaceae",
-  "ae36d99bb59fbe002dd0ad4bbf3207b5" = "Puniceicoccaceae",
-  "2ca3d710d77ff0b8d1697ce6d10a1465" = "koll13",
-  "89bce984ee772ef456dcd0cd52af3e44" = "Desulfovibrionaceae",
-  "886b568b1627d9fad5c2fb841fe62bbd" = "Desulfobulbaceae",
-  "80249904dce392f3f1d75dec25929060" = "Desulfobacteraceae",
-  "0f3fd5c10f86cba16811b85927559d49" = "Piscirickettsiaceae",
-  "95ab37f66dcf6501b9a6258be99a7c79" = "HTCC2089",
-  "1cd7f1533d1d561f5a9a37bc197ad4dd" = "Endozoicimonaceae",
-  "5a8a8c32155609271ab41a52566c7017" = "Vibrionaceae",
-  "b727ff5efbd37a9e8b1675747fe4874e" = "Pasteurellaceae",
-  "b5d31c50e3ab8b7195c9ce3eb8bf3629" = "OM60")
-
-diet.box <- ggplot(diet.data, aes(Treatment, log(Abundance+1), color=Treatment)) +
-  geom_boxplot() + theme_classic() +
-  facet_wrap( ~ OTU , scales="free", ncol=4, labeller=ASV_labeller)+ 
-  theme(axis.text.x = element_text(angle = 0)) + theme(legend.position="none")
-
-# Feeding behaviour boxplot
-diet.box
-```
-
-Vibrio, Lachnospiracea and Pasteurellacea are the most different families in terms of rarefied abundance between the two treatment groups.
-
-```{r echo=TRUE, include=TRUE, tidy=TRUE}
-
-sig.diet.fam.sub <- subset_taxa(sig.diet.fam, Family=="Vibrionaceae" |Family== "Lachnospiraceae" |Family== "Pasteurellaceae")
-
-diet.data <- psmelt(sig.diet.fam.sub)[,c(1,2,3,7,8,9,10, 15:19)]
-
-ASV_names <- list(
-  "77cf7f7c86aba621c027e850038e2400" = "Lachnospiraceae",
-  "5a8a8c32155609271ab41a52566c7017" = "Vibrionaceae",
-  "b727ff5efbd37a9e8b1675747fe4874e" = "Pasteurellaceae")
-
-diet.box <- ggplot(diet.data, aes(Treatment, log(Abundance+1), color=Treatment)) +
-  geom_boxplot() + theme_classic() +
-  facet_wrap( ~ OTU , scales="free", ncol=1, labeller=ASV_labeller)+ 
-  theme(axis.text.x = element_text(angle = 0)) + theme(legend.position="none")
-
-# Feeding behaviour boxplot
-diet.box
-
-# Save output
-ggsave("diet_boxplots.pdf", diet.box, width=210, height=297, units="mm")
-```
-
-# Boral - ordination plots
-
-This analysis produces the ordinations plots for each phyla.
-
-```{r echo=TRUE, include=TRUE, tidy=TRUE}
-library(mvabund)
-library(boral)
-library(RColorBrewer)
-
-psIF.rar <- rarefy_even_depth(psIF, sample.size = min(sample_sums(psIF)), rngseed = 1)
-
-Proteo = subset_taxa(psIF.rar, Phylum=="Proteobacteria")
-Bacter = subset_taxa(psIF.rar, Phylum=="Bacteroidetes")
-Firmi = subset_taxa(psIF.rar, Phylum=="Firmicutes")
-Planc = subset_taxa(psIF.rar, Phylum=="Planctomycetes")
-Tener <- subset_taxa(psIF.rar, Phylum=="Tenericutes")
-Spiro <-subset_taxa(psIF.rar, Phylum=="Spirochaetes")
-Verru <- subset_taxa(psIF.rar, Phylum=="Verrucomicrobia")
-
-Proteo = subset_taxa(psI, Phylum=="Proteobacteria")
-y <- data.frame(t(otu_table(Proteo)))
-fit.lvmnb1<-boral(y=y, family="negative.binomial", lv.control =list(num.lv=2), row.eff="fixed")
-
-Bacter = subset_taxa(psI, Phylum=="Bacteroidetes")
-x <- data.frame(t(otu_table(Bacter)))
-fit.lvmnb2 <- boral(y=x, family="negative.binomial", lv.control =list(num.lv=2), row.eff="fixed")
-
-Firmi = subset_taxa(psI, Phylum=="Firmicutes")
-z <- data.frame(t(otu_table(Firmi)))
-fit.lvmnb3 <- boral(y=z, family="negative.binomial", lv.control =list(num.lv=2), row.eff="fixed")
-
-Planc = subset_taxa(psI, Phylum=="Planctomycetes")
-w <- data.frame(t(otu_table(Planc)))
-fit.lvmnb4 <- boral(y=w, family="negative.binomial", lv.control =list(num.lv=2), row.eff="fixed")
-
-#alpha is an arguement in lvsplot(); relates to scaling
-alpha <- 0.5 
-
-testcov.1 <- fit.lvmnb1$lv.median %*% t(fit.lvmnb1$lv.coefs.median[, 2:3])
-testcov.2 <- fit.lvmnb2$lv.median %*% t(fit.lvmnb2$lv.coefs.median[, 2:3])
-testcov.3 <- fit.lvmnb3$lv.median %*% t(fit.lvmnb3$lv.coefs.median[, 2:3])
-testcov.4 <- fit.lvmnb4$lv.median %*% t(fit.lvmnb4$lv.coefs.median[, 2:3])
-
-#singular value decom
-do.svd1 <- svd(testcov.1, fit.lvmnb1$num.lv, fit.lvmnb1$num.lv)
-do.svd2 <- svd(testcov.2, fit.lvmnb2$num.lv, fit.lvmnb2$num.lv)
-do.svd3 <- svd(testcov.3, fit.lvmnb3$num.lv, fit.lvmnb3$num.lv)
-do.svd4 <- svd(testcov.4, fit.lvmnb4$num.lv, fit.lvmnb4$num.lv)
-
-#svd has components d, u and v
-
-#some math related to rescaling
-choose.lvs1 <- scale(do.svd1$u * matrix(do.svd1$d[1:fit.lvmnb1$num.lv]^alpha, 
-                                        nrow = fit.lvmnb1$n, ncol = 2, byrow = T), center = T, scale = F)
-choose.lvs2 <- scale(do.svd2$u * matrix(do.svd2$d[1:fit.lvmnb2$num.lv]^alpha, 
-                                        nrow = fit.lvmnb2$n, ncol = 2, byrow = T), center = T, scale = F)
-choose.lvs3 <- scale(do.svd3$u * matrix(do.svd3$d[1:fit.lvmnb3$num.lv]^alpha, 
-                                        nrow = fit.lvmnb3$n, ncol = 2, byrow = T), center = T, scale = F)
-choose.lvs4 <- scale(do.svd4$u * matrix(do.svd4$d[1:fit.lvmnb4$num.lv]^alpha, 
-                                        nrow = fit.lvmnb4$n, ncol = 2, byrow = T), center = T, scale = F)
-
-treat <- sample_data(psIF.rar)$Treatment
-speci <- sample_data(psIF.rar)$FishSpecies
-speci <- as.factor(speci)
-
-### Proteobacteria
-
-choose.lvs1 <- as.data.frame(cbind(choose.lvs1, treat, speci))
-choose.lvs1$treat <- as.factor(choose.lvs1$treat)
-choose.lvs1$speci <- as.factor(choose.lvs1$speci)
-colnames(choose.lvs1)[1:2] <- c("LV1", "LV2")
-
-speci.hull.proteo <- NULL
-for(i in levels(choose.lvs1$speci)){
-  tmp <- choose.lvs1[choose.lvs1$speci == i, ][chull(choose.lvs1[choose.lvs1$speci == i ,
-                                                                 c("LV1", "LV2")]), ]
-  if(is.null(speci.hull.proteo)){speci.hull.proteo <- tmp} else 
-    speci.hull.proteo <- rbind(speci.hull.proteo, tmp)
-}
-
-treat.hull.proteo <- NULL
-for(i in levels(choose.lvs1$treat)){
-  tmp <- choose.lvs1[choose.lvs1$treat == i, ][chull(choose.lvs1[choose.lvs1$treat == i ,
-                                                                 c("LV1", "LV2")]), ]
-  if(is.null(treat.hull.proteo)){treat.hull.proteo <- tmp} else 
-    treat.hull.proteo <- rbind(treat.hull.proteo, tmp)
-}
-
-pa1 <- ggplot() +
-  geom_polygon(data=speci.hull.proteo, aes(x=LV1, y=LV2, fill=speci, group=speci), alpha=0.3) +
-  geom_point(data=choose.lvs1, aes(x=LV1, y=LV2, colour=speci), size=4) +
-  coord_equal() +
-  theme(axis.text.x = element_blank(),
-        axis.text.y = element_blank(),
-        axis.ticks = element_blank(),
-        axis.title.x = element_text(size=18),
-        axis.title.y = element_text(size=18),
-        panel.background = element_blank(),
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        plot.background = element_blank(),
-        panel.border = element_rect(colour="black", fill=NA))
-
-pa2 <- ggplot() +
-  geom_polygon(data=treat.hull.proteo, aes(x=LV1, y=LV2, fill=treat, group=treat), alpha=0.3) +
-  geom_point(data=choose.lvs1, aes(x=LV1, y=LV2, colour=treat)) +
-  coord_equal() +
-  theme(axis.text.x = element_blank(),
-        axis.text.y = element_blank(),
-        axis.ticks = element_blank(),
-        axis.title.x = element_text(size=18),
-        axis.title.y = element_text(size=18),
-        panel.background = element_blank(),
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        plot.background = element_blank(),
-        panel.background = element_rect(colour="black", fill=NA, size=2))
-
-### Bacteroidetes
-
-choose.lvs2 <- as.data.frame(cbind(choose.lvs2, treat, speci))
-choose.lvs2$treat <- as.factor(choose.lvs2$treat)
-choose.lvs2$speci <- as.factor(choose.lvs2$speci)
-colnames(choose.lvs2)[1:2] <- c("LV1", "LV2")
-
-speci.hull.bacter <- NULL
-for(i in levels(choose.lvs2$speci)){
-  tmp <- choose.lvs2[choose.lvs2$speci == i, ][chull(choose.lvs2[choose.lvs2$speci == i ,
-                                                                 c("LV1", "LV2")]), ]
-  if(is.null(speci.hull.bacter)){speci.hull.bacter <- tmp} else 
-    speci.hull.bacter <- rbind(speci.hull.bacter, tmp)
-}
-
-treat.hull.bacter <- NULL
-for(i in levels(choose.lvs2$treat)){
-  tmp <- choose.lvs2[choose.lvs2$treat == i, ][chull(choose.lvs2[choose.lvs2$treat == i ,
-                                                                 c("LV1", "LV2")]), ]
-  if(is.null(treat.hull.bacter)){treat.hull.bacter <- tmp} else 
-    treat.hull.bacter <- rbind(treat.hull.bacter, tmp)
-}
-
-pb1 <- ggplot() +
-  geom_polygon(data=speci.hull.bacter, aes(x=LV1, y=LV2, fill=speci, group=speci), alpha=0.3) +
-  geom_point(data=choose.lvs2, aes(x=LV1, y=LV2, colour=speci), size=4) +
-  coord_equal() +
-  theme(axis.text.x = element_blank(),
-        axis.text.y = element_blank(),
-        axis.ticks = element_blank(),
-        axis.title.x = element_text(size=18),
-        axis.title.y = element_text(size=18),
-        panel.background = element_blank(),
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        plot.background = element_blank(),
-        panel.border = element_rect(colour="black", fill=NA))
-
-pb2 <- ggplot() +
-  geom_polygon(data=treat.hull.bacter, aes(x=LV1, y=LV2, fill=treat, group=treat), alpha=0.3) +
-  geom_point(data=choose.lvs2, aes(x=LV1, y=LV2, colour=treat)) +
-  coord_equal() +
-  theme(axis.text.x = element_blank(),
-        axis.text.y = element_blank(),
-        axis.ticks = element_blank(),
-        axis.title.x = element_text(size=18),
-        axis.title.y = element_text(size=18),
-        panel.background = element_blank(),
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        plot.background = element_blank(),
-        panel.border = element_rect(colour="black", fill=NA))
-
-### Firmicutes
-
-choose.lvs3 <- as.data.frame(cbind(choose.lvs3, treat, speci))
-choose.lvs3$treat <- as.factor(choose.lvs3$treat)
-choose.lvs3$speci <- as.factor(choose.lvs3$speci)
-colnames(choose.lvs3)[1:2] <- c("LV1", "LV2")
-
-speci.hull.firmi <- NULL
-for(i in levels(choose.lvs3$speci)){
-  tmp <- choose.lvs3[choose.lvs3$speci == i, ][chull(choose.lvs3[choose.lvs3$speci == i ,
-                                                                 c("LV1", "LV2")]), ]
-  if(is.null(speci.hull.firmi)){speci.hull.firmi <- tmp} else 
-    speci.hull.firmi <- rbind(speci.hull.firmi, tmp)
-}
-
-treat.hull.firmi <- NULL
-for(i in levels(choose.lvs3$treat)){
-  tmp <- choose.lvs3[choose.lvs3$treat == i, ][chull(choose.lvs3[choose.lvs3$treat == i ,
-                                                                 c("LV1", "LV2")]), ]
-  if(is.null(treat.hull.firmi)){treat.hull.firmi <- tmp} else 
-    treat.hull.firmi <- rbind(treat.hull.firmi, tmp)
-}
-
-pc1 <- ggplot() +
-  geom_polygon(data=speci.hull.firmi, aes(x=LV1, y=LV2, fill=speci, group=speci), alpha=0.3) +
-  geom_point(data=choose.lvs3, aes(x=LV1, y=LV2, colour=speci), size=4) +
-  coord_equal() +
-  theme(axis.text.x = element_blank(),
-        axis.text.y = element_blank(),
-        axis.ticks = element_blank(),
-        axis.title.x = element_text(size=18),
-        axis.title.y = element_text(size=18),
-        panel.background = element_blank(),
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        plot.background = element_blank(),
-        panel.border = element_rect(colour="black", fill=NA))
-
-pc2 <- ggplot() +
-  geom_polygon(data=treat.hull.firmi, aes(x=LV1, y=LV2, fill=treat, group=treat), alpha=0.3) +
-  geom_point(data=choose.lvs3, aes(x=LV1, y=LV2, colour=treat)) +
-  coord_equal() +
-  theme(axis.text.x = element_blank(),
-        axis.text.y = element_blank(),
-        axis.ticks = element_blank(),
-        axis.title.x = element_text(size=18),
-        axis.title.y = element_text(size=18),
-        panel.background = element_blank(),
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        plot.background = element_blank(),
-        panel.border = element_rect(colour="black", fill=NA))
-
-### Planctomycetes
-
-choose.lvs4 <- as.data.frame(cbind(choose.lvs4, treat, speci))
-choose.lvs4$treat <- as.factor(choose.lvs4$treat)
-choose.lvs4$speci <- as.factor(choose.lvs4$speci)
-colnames(choose.lvs4)[1:2] <- c("LV1", "LV2")
-
-speci.hull.planc <- NULL
-for(i in levels(choose.lvs4$speci)){
-  tmp <- choose.lvs4[choose.lvs4$speci == i, ][chull(choose.lvs4[choose.lvs4$speci == i ,
-                                                                 c("LV1", "LV2")]), ]
-  if(is.null(speci.hull.planc)){speci.hull.planc <- tmp} else 
-    speci.hull.planc <- rbind(speci.hull.planc, tmp)
-}
-
-treat.hull.planc <- NULL
-for(i in levels(choose.lvs4$treat)){
-  tmp <- choose.lvs4[choose.lvs4$treat == i, ][chull(choose.lvs4[choose.lvs4$treat == i ,
-                                                                 c("LV1", "LV2")]), ]
-  if(is.null(treat.hull.planc)){treat.hull.planc <- tmp} else 
-    treat.hull.planc <- rbind(treat.hull.planc, tmp)
-}
-
-pd1 <- ggplot() +
-  geom_polygon(data=speci.hull.planc, aes(x=LV1, y=LV2, fill=speci, group=speci), alpha=0.3) +
-  geom_point(data=choose.lvs4, aes(x=LV1, y=LV2, colour=speci), size=4) +
-  coord_equal() +
-  theme(axis.text.x = element_blank(),
-        axis.text.y = element_blank(),
-        axis.ticks = element_blank(),
-        axis.title.x = element_text(size=18),
-        axis.title.y = element_text(size=18),
-        panel.background = element_blank(),
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        plot.background = element_blank(),
-        panel.border = element_rect(colour="black", fill=NA))
-
-pd2 <- ggplot() +
-  geom_polygon(data=treat.hull.planc, aes(x=LV1, y=LV2, fill=treat, group=treat), alpha=0.3) +
-  geom_point(data=choose.lvs4, aes(x=LV1, y=LV2, colour=treat)) +
-  coord_equal() +
-  theme(axis.text.x = element_blank(),
-        axis.text.y = element_blank(),
-        axis.ticks = element_blank(),
-        axis.title.x = element_text(size=18),
-        axis.title.y = element_text(size=18),
-        panel.background = element_blank(),
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        plot.background = element_blank(),
-        panel.border = element_rect(colour="black", fill=NA))
-
-
-ggsave("ordinations.pdf", 
-       ggarrange(pa1, pa2, pb1, pb2, pc1, pc2, pd1, pd2, ncol=2), dpi=600, width=210, height=297, units="mm")
-```
-       
 # Analysis of Chlorphyll
 
 First we extract all Chloroplast and Cyanobacterial sequences and store as a phyloseq object 'Chloro'
